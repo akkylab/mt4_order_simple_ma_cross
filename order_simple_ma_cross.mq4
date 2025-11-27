@@ -89,6 +89,7 @@ void OnTick(){
    if(!IsTradeAllowed()){
       return;
    }
+   
    // 変数の初期化
    int positionCount = OrdersTotal();       // 現在保有しているポジション数
    int orderType = -1;                      // 注文タイプ (0:買い, 1:売り, -1:未設定)
@@ -102,36 +103,39 @@ void OnTick(){
       return;
    }
 
-   // ポジションがない場合のみエントリー判定を行う
+   // 短期移動平均線の値を取得
+   double shortMA_Current = iMA(NULL, 0, ShortMAPeriod, 0, MODE_SMA, PRICE_CLOSE, 1);   // 1本前
+   double shortMA_Previous = iMA(NULL, 0, ShortMAPeriod, 0, MODE_SMA, PRICE_CLOSE, 2);  // 2本前
+       
+   // 長期移動平均線の値を取得
+   double longMA_Current = iMA(NULL, 0, LongMAPeriod, 0, MODE_SMA, PRICE_CLOSE, 1);     // 1本前
+   double longMA_Previous = iMA(NULL, 0, LongMAPeriod, 0, MODE_SMA, PRICE_CLOSE, 2);    // 2本前
+
+   // ゴールデンクロスの判定（買いシグナル）
+   // 条件：短期MAが長期MAを下から上に突き抜けた
+   bool isGoldenCross = false;
+   if(shortMA_Current > longMA_Current && 
+      shortMA_Previous < longMA_Previous && 
+      shortMA_Current > shortMA_Previous){
+      isGoldenCross = true;
+   }
+   
+   // デッドクロスの判定（売りシグナル）
+   // 条件：短期MAが長期MAを上から下に突き抜けた
+   bool isDeadCross = false;
+   if(shortMA_Current < longMA_Current && 
+      shortMA_Previous > longMA_Previous && 
+      shortMA_Current < shortMA_Previous){
+      isDeadCross = true;
+   }
+
+   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   // 【パターン1】ポジションがない場合：エントリー判定
+   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
    if(positionCount == 0){
       // フラグ変数の初期化
       bool shouldBuy  = false;              // 買いエントリーフラグ
       bool shouldSell = false;              // 売りエントリーフラグ
-      bool isGoldenCross = false;           // ゴールデンクロス判定フラグ
-      bool isDeadCross = false;             // デッドクロス判定フラグ
-
-      // 短期移動平均線の値を取得
-      double shortMA_Current = iMA(NULL, 0, ShortMAPeriod, 0, MODE_SMA, PRICE_CLOSE, 1);   // 1本前
-      double shortMA_Previous = iMA(NULL, 0, ShortMAPeriod, 0, MODE_SMA, PRICE_CLOSE, 2);  // 2本前
-          
-      // 長期移動平均線の値を取得
-      double longMA_Current = iMA(NULL, 0, LongMAPeriod, 0, MODE_SMA, PRICE_CLOSE, 1);     // 1本前
-      double longMA_Previous = iMA(NULL, 0, LongMAPeriod, 0, MODE_SMA, PRICE_CLOSE, 2);    // 2本前
-   
-      // ゴールデンクロスの判定（買いシグナル）
-      // 条件：短期MAが長期MAを下から上に突き抜けた
-      if(shortMA_Current > longMA_Current && 
-         shortMA_Previous < longMA_Previous && 
-         shortMA_Current > shortMA_Previous){
-         isGoldenCross = true;
-      }
-      // デッドクロスの判定（売りシグナル）
-      // 条件：短期MAが長期MAを上から下に突き抜けた
-      else if(shortMA_Current < longMA_Current && 
-              shortMA_Previous > longMA_Previous && 
-              shortMA_Current < shortMA_Previous){
-         isDeadCross = true;
-      }
 
       // エントリーフラグの設定
       if(isGoldenCross){
@@ -157,6 +161,30 @@ void OnTick(){
       // 注文を実行
       if(orderType > -1){
          ExecuteOrder(orderType, stopLossPrice, takeProfitPrice, TradeLots, EA_NAME, 777);
+      }
+   }
+   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   // 【パターン2】ポジションがある場合：エグジット判定
+   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   else if(positionCount > 0){
+      // すべてのポジションをチェック
+      for(int i = positionCount - 1; i >= 0; i--){
+         // ポジション情報を取得
+         if(OrderSelect(i, SELECT_BY_POS, MODE_TRADES)){
+            // このEAが発注したポジションかチェック（マジックナンバーで判定）
+            if(OrderMagicNumber() == 777 && OrderSymbol() == Symbol()){
+               int currentOrderType = OrderType();
+               
+               // 買いポジション保有中にデッドクロスが発生 → 決済
+               if(currentOrderType == OP_BUY && isDeadCross){
+                  CloseOrder(OrderTicket());
+               }
+               // 売りポジション保有中にゴールデンクロスが発生 → 決済
+               else if(currentOrderType == OP_SELL && isGoldenCross){
+                  CloseOrder(OrderTicket());
+               }
+            }
+         }
       }
    }
 
@@ -207,6 +235,53 @@ bool ExecuteOrder(int orderType, double stopLoss, double takeProfit, double lots
       }
    }
 
+   // 3回リトライしても失敗した場合
+   return false;
+}
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  【関数5】CloseOrder() - ポジション決済関数
+//  指定されたチケット番号のポジションを決済する（最大3回リトライ）
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+bool CloseOrder(int ticketNumber){
+   bool closeResult = false;
+   
+   // 最大3回まで決済を試行
+   for(int retryCount = 0; retryCount < 3; retryCount++){
+      RefreshRates();  // 最新の価格情報を取得
+      
+      // ポジション情報を取得
+      if(OrderSelect(ticketNumber, SELECT_BY_TICKET)){
+         double closePrice = 0;
+         color arrowColor = clrNONE;
+         
+         // 決済価格と矢印の色を設定
+         if(OrderType() == OP_BUY){
+            closePrice = Bid;      // 買いポジションはBidで決済
+            arrowColor = clrRed;
+         }else if(OrderType() == OP_SELL){
+            closePrice = Ask;      // 売りポジションはAskで決済
+            arrowColor = clrBlue;
+         }
+         
+         // ポジションを決済
+         closeResult = OrderClose(ticketNumber, OrderLots(), closePrice, 20, arrowColor);
+         
+         if(closeResult){
+            // 決済成功
+            Print("ポジション決済成功! チケットNo=", ticketNumber,
+                  " 決済レート=", closePrice);
+            return true;
+         }else{
+            // 決済失敗
+            int errorCode = GetLastError();
+            Print("ポジション決済失敗 エラーNo=", errorCode,
+                  " リトライ回数=", retryCount + 1);
+            Sleep(2000);  // 2秒待機してから再試行
+         }
+      }
+   }
+   
    // 3回リトライしても失敗した場合
    return false;
 }
