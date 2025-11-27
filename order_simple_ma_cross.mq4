@@ -85,6 +85,10 @@ void OnDeinit(const int reason){
 //  新しい価格データが来るたびに実行される
 //━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 void OnTick(){
+   // MT4の「自動売買」ボタンがOFFの時、この関数をスキップする
+   if(!IsTradeAllowed()){
+      return;
+   }
    // 変数の初期化
    int positionCount = OrdersTotal();       // 現在保有しているポジション数
    int orderType = -1;                      // 注文タイプ (0:買い, 1:売り, -1:未設定)
