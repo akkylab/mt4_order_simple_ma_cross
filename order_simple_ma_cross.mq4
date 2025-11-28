@@ -115,8 +115,7 @@ void OnTick(){
    // 条件：短期MAが長期MAを下から上に突き抜けた
    bool isGoldenCross = false;
    if(shortMA_Current > longMA_Current && 
-      shortMA_Previous < longMA_Previous && 
-      shortMA_Current > shortMA_Previous){
+      shortMA_Previous < longMA_Previous){
       isGoldenCross = true;
    }
    
@@ -124,8 +123,7 @@ void OnTick(){
    // 条件：短期MAが長期MAを上から下に突き抜けた
    bool isDeadCross = false;
    if(shortMA_Current < longMA_Current && 
-      shortMA_Previous > longMA_Previous && 
-      shortMA_Current < shortMA_Previous){
+      shortMA_Previous > longMA_Previous){
       isDeadCross = true;
    }
 
